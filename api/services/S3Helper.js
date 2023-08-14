@@ -83,12 +83,7 @@ class S3Client {
     return objects;
   }
 
-  // TODO: Update this method next (WIP)
   async listObjectsPaged(prefix, startAfterKey = null, totalMaxObjects = 200) {
-    console.log("S3Helper.S3Client.listObjects()");
-    console.log(`  prefix: ${prefix}`);
-    console.log(`  startAfterKey: ${startAfterKey}`);
-    console.log(`  totalMaxObjects: ${totalMaxObjects}`);
     /*
      * Returns a promise that resolves to a potentially-truncated array of
      * the S3 Objects starting with the given prefix in
@@ -96,14 +91,40 @@ class S3Client {
      * The object resolved by the promise will include an `isTruncated` flag
      * to indicate if the `files` array is truncated.
      */
-    return new Promise((resolve, reject) => {
-      const maxKeys = Math.min(S3_DEFAULT_MAX_KEYS, totalMaxObjects);
+    const maxKeys = Math.min(S3_DEFAULT_MAX_KEYS, totalMaxObjects);
 
-      this.listObjectsHelper(null,
-        { Prefix: prefix, MaxKeys: maxKeys, StartAfter: startAfterKey },
-        { totalMaxObjects },
-        resolveCallback(resolve, reject));
-    });
+    const paginationsConfig = {
+      client: this.client,
+      pageSize: maxKeys,
+    };
+    const listCommandInput = {
+      Bucket: this.bucket,
+      Prefix: prefix,
+      Delimiter: '/',
+      StartAfter: startAfterKey,
+    };
+
+    const paginator = paginateListObjectsV2(paginationsConfig, listCommandInput);
+    const objects = [];
+
+    var wereS3ResultsTruncated = false;
+    // Concatenate S3 pages until there are enough for OUR page size
+    for await (const page of paginator) {
+      objects.push(...page.Contents);
+      if (objects.length >= totalMaxObjects) {
+        break;
+      }
+      wereS3ResultsTruncated = page.isTruncated;
+    }
+
+    // Truncate results before returning if there are more than our page size
+    const truncatedObjects = objects.slice(0, totalMaxObjects);
+    var wereResultsTruncated = (wereS3ResultsTruncated || truncatedObjects.length < objects.length);
+
+    return {
+      wereResultsTruncated,
+      objects: truncatedObjects,
+    };
   }
 
   putObject(body, key, extras = {}) {
@@ -126,43 +147,6 @@ class S3Client {
       ...extras,
     };
     return client.getObject(params).promise();
-  }
-
-  // Private Methods
-  async listObjectsHelper(currObjects, extraS3Params = {}, opts = {}, callback) {
-    const listObjectArgs = { Bucket: this.bucket, ...extraS3Params };
-
-    const command = new ListObjectsV2Command(listObjectArgs);
-
-    try {
-      response = await this.client.send(command);
-
-      const aggregationKey = opts.aggregationKey || 'Contents';
-      const { totalMaxObjects } = opts;
-
-      const objects = currObjects ? currObjects.concat(data[aggregationKey])
-        : data[aggregationKey];
-
-      // if the number of results should be limited
-      if (shouldPageResults(totalMaxObjects, data.IsTruncated, objects)) {
-        // then callback with the paged results
-        return callback(null, createPagedResults(totalMaxObjects, data.IsTruncated, objects));
-      }
-      // otherwise continue as normal (ie, not paged)
-      if (data.IsTruncated) {
-        const newExtraParams = {
-          ...extraS3Params,
-          ContinuationToken: data.NextContinuationToken,
-        };
-        // call recursively
-        return this.listObjectsHelper(objects, newExtraParams, opts, callback);
-      }
-      // else done !
-      return callback(null, objects);
-    } catch(err) {
-      console.log("Oh no!");
-      return callback(err);
-    };
   }
 }
 
