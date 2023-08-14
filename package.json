@@ -192,8 +192,5 @@
   "lint-staged": {
     "*.js": "eslint",
     "*.jsx": "eslint"
-  },
-  "jest": {
-    "testEnvironment": "jsdom"
   }
 }
