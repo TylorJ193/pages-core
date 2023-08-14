@@ -38,6 +38,15 @@ const overrides = [
       'node': true
     },
   },
+  {
+    files: [
+      "**/*.test.js"
+    ],
+    env: {
+      jest: true,
+    },
+    plugins: ["jest"],
+  }
 ];
 
 module.exports = {
