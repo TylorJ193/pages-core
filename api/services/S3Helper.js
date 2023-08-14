@@ -1,4 +1,4 @@
-const AWS = require('aws-sdk');
+const { S3, paginateListObjectsV2 } = require('@aws-sdk/client-s3');
 const { retry } = require('../utils');
 
 const S3_DEFAULT_MAX_KEYS = 1000;
@@ -34,7 +34,7 @@ function resolveCallback(resolve, reject) {
 class S3Client {
   constructor(credentials) {
     this.bucket = credentials.bucket;
-    this.client = new AWS.S3({
+    this.client = new S3({
       accessKeyId: credentials.accessKeyId,
       secretAccessKey: credentials.secretAccessKey,
       region: credentials.region,
@@ -46,36 +46,49 @@ class S3Client {
     return retry(() => client.headBucket({ Bucket: bucket }).promise(), { waitTime: 2000 });
   }
 
-  listCommonPrefixes(prefix) {
+  async listCommonPrefixes(prefix) {
     /*
      * Returns a promise that resolves to an array of
      * the "Common Prefixes" of the S3 Objects
      * starting with the given prefix in the bucket
      * defined in the application's config.s3 object.
      */
-    return new Promise((resolve, reject) => {
-      this.listObjectsHelper(null,
-        { Prefix: prefix, Delimiter: '/' },
-        { aggregationKey: 'CommonPrefixes' },
-        resolveCallback(resolve, reject));
-    });
+    const paginationsConfig = { client: this.client };
+    const listCommandInput = { Bucket: this.bucket, Prefix: prefix, Delimiter: '/' };
+
+    const paginator = paginateListObjectsV2(paginationsConfig, listCommandInput);
+    const commonPrefixes = [];
+    for await (const page of paginator) {
+      commonPrefixes.push(...page.CommonPrefixes);
+    }
+
+    return commonPrefixes;
   }
 
-  listObjects(prefix) {
+  async listObjects(prefix) {
     /*
      * Returns a promise that resolves to an array of
      * the S3 Objects starting with the given prefix in
      * the bucket defined in the application's config.s3 object.
      */
-    return new Promise((resolve, reject) => {
-      this.listObjectsHelper(null,
-        { Prefix: prefix },
-        {},
-        resolveCallback(resolve, reject));
-    });
+    const paginationsConfig = { client: this.client };
+    const listCommandInput = { Bucket: this.bucket, Prefix: prefix, Delimiter: '/' };
+
+    const paginator = paginateListObjectsV2(paginationsConfig, listCommandInput);
+    const objects = [];
+    for await (const page of paginator) {
+      objects.push(...page.Contents);
+    }
+
+    return objects;
   }
 
-  listObjectsPaged(prefix, startAfterKey = null, totalMaxObjects = 200) {
+  // TODO: Update this method next (WIP)
+  async listObjectsPaged(prefix, startAfterKey = null, totalMaxObjects = 200) {
+    console.log("S3Helper.S3Client.listObjects()");
+    console.log(`  prefix: ${prefix}`);
+    console.log(`  startAfterKey: ${startAfterKey}`);
+    console.log(`  totalMaxObjects: ${totalMaxObjects}`);
     /*
      * Returns a promise that resolves to a potentially-truncated array of
      * the S3 Objects starting with the given prefix in
@@ -116,13 +129,13 @@ class S3Client {
   }
 
   // Private Methods
-  listObjectsHelper(currObjects, extraS3Params = {}, opts = {}, callback) {
+  async listObjectsHelper(currObjects, extraS3Params = {}, opts = {}, callback) {
     const listObjectArgs = { Bucket: this.bucket, ...extraS3Params };
 
-    this.client.listObjectsV2(listObjectArgs, (err, data) => {
-      if (err) {
-        return callback(err);
-      }
+    const command = new ListObjectsV2Command(listObjectArgs);
+
+    try {
+      response = await this.client.send(command);
 
       const aggregationKey = opts.aggregationKey || 'Contents';
       const { totalMaxObjects } = opts;
@@ -136,7 +149,6 @@ class S3Client {
         return callback(null, createPagedResults(totalMaxObjects, data.IsTruncated, objects));
       }
       // otherwise continue as normal (ie, not paged)
-
       if (data.IsTruncated) {
         const newExtraParams = {
           ...extraS3Params,
@@ -147,7 +159,10 @@ class S3Client {
       }
       // else done !
       return callback(null, objects);
-    });
+    } catch(err) {
+      console.log("Oh no!");
+      return callback(err);
+    };
   }
 }
 
