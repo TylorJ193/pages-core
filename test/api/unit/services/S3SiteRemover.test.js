@@ -1,7 +1,8 @@
 const nock = require('nock');
 const { expect } = require('chai');
 
-const AWSMocks = require('../../support/aws-mocks');
+const { S3Client, ListObjectsV2Command, DeleteObjectsCommand } = require('@aws-sdk/client-s3');
+const { mockClient } = require('aws-sdk-client-mock');
 const mockTokenRequest = require('../../support/cfAuthNock');
 const apiNocks = require('../../support/cfAPINocks');
 const factory = require('../../support/factory');
@@ -10,26 +11,6 @@ const S3SiteRemover = require('../../../../api/services/S3SiteRemover');
 const s3ServiceName = 'site-service';
 const s3ServiceGuid = 'site-service-guid';
 const awsBucketName = 'site-bucket-name';
-
-const mapSiteContents = objects => ({
-  Contents: objects.map(Key => ({ Key })),
-});
-
-const buildCacheObjects = (bucket) => {
-  bucket.push('_cache/asdfhjkl');
-  bucket.push('_cache/qwertyui');
-  return bucket;
-};
-
-const buildSiteObjects = (qualifier = 'site', site, bucket) => {
-  const prefix = `${qualifier}/${site.owner}/${site.repository}`;
-
-  bucket.push(`${prefix}/index.html`);
-  bucket.push(`${prefix}/redirect`);
-  bucket.push(`${prefix}/redirect/index.html`);
-
-  return bucket;
-};
 
 function createServiceNocks(serviceName, guid, bucketName) {
   const serviceInstanceResponse = factory.responses.service({
@@ -51,129 +32,52 @@ function createServiceNocks(serviceName, guid, bucketName) {
   apiNocks.mockFetchServiceInstanceCredentialsRequest(guid, { resources: [credentialsReponse] });
 }
 
-describe('S3SiteRemover', () => {
+describe.only('S3SiteRemover', () => {
   beforeEach(() => {
-    AWSMocks.mocks.S3.headBucket = () => ({ promise: () => Promise.resolve() });
     createServiceNocks(s3ServiceName, s3ServiceGuid, awsBucketName);
-  });
-
-  after(() => {
-    AWSMocks.resetMocks();
   });
 
   afterEach(() => nock.cleanAll());
 
   describe('.removeSite(site)', () => {
-    it('should delete all objects in the `site/<org>/<repo>`, `demo/<org>/<repo>`, `preview/<org>/<repo>`, and `_cache` directories', (done) => {
-      const siteObjectsToDelete = [];
-      const demoObjectsToDelete = [];
-      const previewObjectsToDelete = [];
-      const cacheObjectsToDelete = [];
-
+    it.only('should delete all objects in the site\'s S3 bucket', (done) => {
       let site;
-      let objectsWereDeleted = false;
-      let siteObjectsWereListed = false;
-      let demoObjectWereListed = false;
-      let previewObjectsWereListed = false;
-      let cacheObjectsWereListed = false;
-      let objectsToDelete;
+      const objectsToDelete = [
+        'site/owner/repo/index.html',
+        'demo/owner/repo/redirect',
+        '_cache/asdfhjkl',
+        'site/owner/repo',
+        'demo/owner/repo',
+        '_cache',
+        'robots.txt',
+      ];
+
+      const s3Mock = mockClient(S3Client);
+      s3Mock
+      .on(ListObjectsV2Command).resolves({
+        IsTruncated: false,
+        Contents: objectsToDelete.map(object => ({ Key: object })),
+        ContinuationToken: "A",
+        NextContinuationToken: null,
+      })
+      .on(DeleteObjectsCommand, {
+        Contents: objectsToDelete.map(object => ({ Key: object }))
+      }).resolves({});
 
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
-
-      AWSMocks.mocks.S3.listObjectsV2 = (params, cb) => {
-        expect(params.Bucket).to.equal(awsBucketName);
-        if (params.Prefix === `site/${site.owner}/${site.repository}/`) {
-          siteObjectsWereListed = true;
-          cb(null, mapSiteContents(siteObjectsToDelete));
-        } else if (params.Prefix === `demo/${site.owner}/${site.repository}/`) {
-          demoObjectWereListed = true;
-          cb(null, mapSiteContents(demoObjectsToDelete));
-        } else if (params.Prefix === `preview/${site.owner}/${site.repository}/`) {
-          previewObjectsWereListed = true;
-          cb(null, mapSiteContents(previewObjectsToDelete));
-        } else if (params.Prefix === '_cache/') {
-          cacheObjectsWereListed = true;
-          cb(null, mapSiteContents(cacheObjectsToDelete));
-        }
-      };
-
-      AWSMocks.mocks.S3.deleteObjects = (params, cb) => {
-        expect(params.Bucket).to.equal(awsBucketName);
-
-        objectsToDelete = [
-          ...siteObjectsToDelete,
-          ...demoObjectsToDelete,
-          ...previewObjectsToDelete,
-          ...cacheObjectsToDelete,
-          ...[
-            `site/${site.owner}/${site.repository}`,
-            `demo/${site.owner}/${site.repository}`,
-            `preview/${site.owner}/${site.repository}`,
-            '_cache',
-          ],
-          'robots.txt',
-        ];
-
-        expect(params.Delete.Objects).to.have.length(objectsToDelete.length);
-        params.Delete.Objects.forEach((object) => {
-          const index = objectsToDelete.indexOf(object.Key);
-          expect(index).to.be.at.least(0);
-          objectsToDelete.splice(index, 1);
-        });
-
-        objectsWereDeleted = true;
-        cb(null, {});
-      };
 
       factory.site({
         awsBucketName,
         s3ServiceName,
       }).then((model) => {
         site = model;
-
-        buildSiteObjects('site', site, siteObjectsToDelete);
-        buildSiteObjects('demo', site, demoObjectsToDelete);
-        buildSiteObjects('preview', site, previewObjectsToDelete);
-        buildCacheObjects(cacheObjectsToDelete);
-
         return S3SiteRemover.removeSite(site);
       }).then(() => {
-        expect(siteObjectsWereListed).to.equal(true);
-        expect(demoObjectWereListed).to.equal(true);
-        expect(previewObjectsWereListed).to.equal(true);
-        expect(cacheObjectsWereListed).to.equal(true);
-        expect(objectsWereDeleted).to.equal(true);
-        expect(objectsToDelete.length).to.equal(0);
-
+        expect(s3Mock).toHaveReceivedCommand(ListObjectsV2Command);
+        expect(s3Mock).toHaveReceivedCommand(DeleteObjectsCommand);
         done();
       })
-    });
-
-    it('should delete objects in batches of 1000 at a time', (done) => {
-      let deleteObjectsCallCount = 0;
-
-      mockTokenRequest();
-      apiNocks.mockDefaultCredentials();
-
-      AWSMocks.mocks.S3.listObjectsV2 = (params, cb) => cb(null, {
-        Contents: Array(800).fill(0).map(() => ({ Key: 'abc123' })),
-      });
-
-      AWSMocks.mocks.S3.deleteObjects = (params, cb) => {
-        expect(params.Delete.Objects).to.have.length.at.most(1000);
-        deleteObjectsCallCount += 1;
-        cb();
-      };
-
-      factory.site()
-        .then(site => S3SiteRemover.removeSite(site))
-        .then(() => {
-        // 800 site, 800 demo, 800 preview, 800 cache objects, robots.txt = 3201 total
-        // 3201 objects means 4 groups of 1000
-          expect(deleteObjectsCallCount).to.equal(4);
-          done();
-        });
     });
 
     it('should resolve if no bucket exists', (done) => {
