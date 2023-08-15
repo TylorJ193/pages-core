@@ -3,34 +3,6 @@ const { retry } = require('../utils');
 
 const S3_DEFAULT_MAX_KEYS = 1000;
 
-function shouldPageResults(totalMaxObjects, isTruncated, objects) {
-  // We're ready to exit if the totalMaxObjects is defined, and
-  // if either the response data are not truncated
-  // or the current objects length is >= to the desired totalMaxObjects
-  return totalMaxObjects && (!isTruncated || objects.length >= totalMaxObjects);
-}
-
-function createPagedResults(totalMaxObjects, isTruncated, objects) {
-  // First, truncate the objects to the maximum total objects
-  // or its length (slice will only go as far as the array's length)
-  const truncatedObjects = objects.slice(0, totalMaxObjects);
-
-  return {
-    isTruncated,
-    objects: truncatedObjects,
-  };
-}
-
-function resolveCallback(resolve, reject) {
-  return (err, objects) => {
-    if (err) {
-      reject(err);
-    } else {
-      resolve(objects);
-    }
-  };
-}
-
 class S3Client {
   constructor(credentials) {
     this.bucket = credentials.bucket;
