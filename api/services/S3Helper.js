@@ -119,10 +119,10 @@ class S3Client {
 
     // Truncate results before returning if there are more than our page size
     const truncatedObjects = objects.slice(0, totalMaxObjects);
-    var wereResultsTruncated = (wereS3ResultsTruncated || truncatedObjects.length < objects.length);
+    var isTruncated = (wereS3ResultsTruncated || truncatedObjects.length < objects.length);
 
     return {
-      wereResultsTruncated,
+      isTruncated,
       objects: truncatedObjects,
     };
   }
