@@ -1,7 +1,8 @@
 const nock = require('nock');
 const { expect } = require('chai');
 
-const AWSMocks = require('../../support/aws-mocks');
+const { S3Client, ListObjectsV2Command } = require('@aws-sdk/client-s3');
+const { mockClient } = require('aws-sdk-client-mock');
 const mockTokenRequest = require('../../support/cfAuthNock');
 const apiNocks = require('../../support/cfAPINocks');
 const factory = require('../../support/factory');
@@ -9,10 +10,6 @@ const config = require('../../../../config');
 const S3PublishedFileLister = require('../../../../api/services/S3PublishedFileLister');
 
 describe('S3PublishedFileLister', () => {
-  after(() => {
-    AWSMocks.resetMocks();
-  });
-
   afterEach(() => nock.cleanAll());
 
   describe('.listPublishedPreviews(site)', () => {
@@ -22,23 +19,21 @@ describe('S3PublishedFileLister', () => {
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
 
-      AWSMocks.mocks.S3.listObjectsV2 = (params, callback) => {
-        expect(params.Bucket).to.equal(config.s3.bucket);
-        expect(params.Prefix).to.equal(`preview/${site.owner}/${site.repository}/`);
-        expect(params.Delimiter).to.equal('/');
-        callback(null, {
-          IsTruncated: false,
-          Contents: [],
+      factory.site().then((model) => {
+        site = model;
+
+        const s3Mock = mockClient(S3Client);
+        s3Mock.on(ListObjectsV2Command).resolvesOnce({
+          IsTruncated: true,
           CommonPrefixes: [
             { Prefix: `preview/${site.owner}/${site.repository}/abc/` },
             { Prefix: `preview/${site.owner}/${site.repository}/def/` },
             { Prefix: `preview/${site.owner}/${site.repository}/ghi/` },
           ],
+          ContinuationToken: "A",
+          NextContinuationToken: null,
         });
-      };
 
-      factory.site().then((model) => {
-        site = model;
         return S3PublishedFileLister.listPublishedPreviews(site);
       }).then((publishedPreviews) => {
         expect(publishedPreviews).to.deep.equal(['abc', 'def', 'ghi']);
@@ -53,9 +48,10 @@ describe('S3PublishedFileLister', () => {
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
 
-      AWSMocks.mocks.S3.listObjectsV2 = (params, callback) => {
-        callback({ status: 403, code: 'InvalidAccessKeyId' }, null);
-      };
+      const s3Mock = mockClient(S3Client);
+      s3Mock.on(ListObjectsV2Command).rejects({
+        code: 'InvalidAccessKeyId',
+      });
 
       factory.site()
         .then((model) => {
@@ -77,23 +73,30 @@ describe('S3PublishedFileLister', () => {
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
 
-      AWSMocks.mocks.S3.listObjectsV2 = (params, callback) => {
-        expect(params.Bucket).to.equal(config.s3.bucket);
-        expect(params.Prefix).to.equal(prefix);
+      factory.site({ defaultBranch: 'main' }).then((model) => {
+        site = model;
+        prefix = `site/${site.owner}/${site.repository}/`;
 
-        callback(null, {
-          IsTruncated: false,
+        // Initializing the mock in here because it needs prefix
+        const s3Mock = mockClient(S3Client);
+        s3Mock.on(ListObjectsV2Command).resolvesOnce({
+          IsTruncated: true,
           Contents: [
             { Key: `${prefix}abc`, Size: 123 },
             { Key: `${prefix}abc/def`, Size: 456 },
             { Key: `${prefix}ghi`, Size: 789 },
           ],
-        });
-      };
+          ContinuationToken: "A",
+          NextContinuationToken: "B",
+        }).resolvesOnce({
+          IsTruncated: false,
+          Contents: [
 
-      factory.site({ defaultBranch: 'main' }).then((model) => {
-        site = model;
-        prefix = `site/${site.owner}/${site.repository}/`;
+          ],
+          ContinuationToken: "B",
+          NextContinuationToken: null,
+        });
+
         return S3PublishedFileLister.listPagedPublishedFilesForBranch(site, 'main');
       }).then((publishedFiles) => {
         expect(publishedFiles).to.deep.equal({
@@ -115,23 +118,30 @@ describe('S3PublishedFileLister', () => {
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
 
-      AWSMocks.mocks.S3.listObjectsV2 = (params, callback) => {
-        expect(params.Bucket).to.equal(config.s3.bucket);
-        expect(params.Prefix).to.equal(prefix);
+      factory.site({ demoBranch: 'demo-branch-name' }).then((model) => {
+        site = model;
+        prefix = `demo/${site.owner}/${site.repository}/`;
 
-        callback(null, {
-          IsTruncated: false,
+        // Initializing the mock in here because it needs prefix
+        const s3Mock = mockClient(S3Client);
+        s3Mock.on(ListObjectsV2Command).resolvesOnce({
+          IsTruncated: true,
           Contents: [
             { Key: `${prefix}abc`, Size: 123 },
             { Key: `${prefix}abc/def`, Size: 456 },
             { Key: `${prefix}ghi`, Size: 789 },
           ],
-        });
-      };
+          ContinuationToken: "A",
+          NextContinuationToken: "B",
+        }).resolvesOnce({
+          IsTruncated: false,
+          Contents: [
 
-      factory.site({ demoBranch: 'demo-branch-name' }).then((model) => {
-        site = model;
-        prefix = `demo/${site.owner}/${site.repository}/`;
+          ],
+          ContinuationToken: "B",
+          NextContinuationToken: null,
+        });
+
         return S3PublishedFileLister.listPagedPublishedFilesForBranch(site, 'demo-branch-name');
       }).then((publishedFiles) => {
         expect(publishedFiles).to.deep.equal({
@@ -153,23 +163,30 @@ describe('S3PublishedFileLister', () => {
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
 
-      AWSMocks.mocks.S3.listObjectsV2 = (params, callback) => {
-        expect(params.Bucket).to.equal(config.s3.bucket);
-        expect(params.Prefix).to.equal(prefix);
+      factory.site({ defaultBranch: 'main' }).then((model) => {
+        site = model;
+        prefix = `preview/${site.owner}/${site.repository}/preview/`;
 
-        callback(null, {
-          IsTruncated: false,
+        // Initializing the mock in here because it needs prefix
+        const s3Mock = mockClient(S3Client);
+        s3Mock.on(ListObjectsV2Command).resolvesOnce({
+          IsTruncated: true,
           Contents: [
             { Key: `${prefix}abc`, Size: 123 },
             { Key: `${prefix}abc/def`, Size: 456 },
             { Key: `${prefix}ghi`, Size: 789 },
           ],
-        });
-      };
+          ContinuationToken: "A",
+          NextContinuationToken: "B",
+        }).resolvesOnce({
+          IsTruncated: false,
+          Contents: [
 
-      factory.site({ defaultBranch: 'main' }).then((model) => {
-        site = model;
-        prefix = `preview/${site.owner}/${site.repository}/preview/`;
+          ],
+          ContinuationToken: "B",
+          NextContinuationToken: null,
+        });
+
         return S3PublishedFileLister.listPagedPublishedFilesForBranch(site, 'preview');
       }).then((publishedFiles) => {
         expect(publishedFiles).to.deep.equal({
@@ -188,7 +205,8 @@ describe('S3PublishedFileLister', () => {
       mockTokenRequest();
       apiNocks.mockDefaultCredentials();
 
-      AWSMocks.mocks.S3.listObjectsV2 = (params, cb) => cb(new Error('Test error'));
+      const s3Mock = mockClient(S3Client);
+      s3Mock.on(ListObjectsV2Command).rejects('Test error');
 
       factory.site()
         .then(site => S3PublishedFileLister.listPagedPublishedFilesForBranch(site, 'preview'))
