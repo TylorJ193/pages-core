@@ -8,7 +8,7 @@ const apiNocks = require('../../support/cfAPINocks');
 const factory = require('../../support/factory');
 const S3SiteRemover = require('../../../../api/services/S3SiteRemover');
 
-const s3ServiceName = 'site-service';
+const s3ServiceName = 'federalist-dev-s3';
 const s3ServiceGuid = 'site-service-guid';
 const awsBucketName = 'site-bucket-name';
 

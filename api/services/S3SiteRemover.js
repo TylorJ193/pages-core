@@ -28,7 +28,9 @@ const removeSite = async (site) => {
   let credentials;
   try {
     try {
+      console.log("S3SiteRemover: site.s3ServiceName: ", site.s3ServiceName);
       credentials = await apiClient.fetchServiceInstanceCredentials(site.s3ServiceName);
+      console.log("S3SiteRemover credentials retrieved succesfully in try block", credentials);
     } catch (err) {
       if (!err.message.match(/Not found/)) {
         throw err;
@@ -36,6 +38,7 @@ const removeSite = async (site) => {
       const service = await apiClient.fetchServiceInstance(site.s3ServiceName);
       await apiClient.createServiceKey(site.s3ServiceName, service.metadata.guid);
       credentials = await apiClient.fetchServiceInstanceCredentials(site.s3ServiceName);
+      console.log("S3SiteRemover credentials retrieved in error block", credentials);
     }
 
     console.log("S3SiteRemover.removeSite() about to initialize the S3Client");
@@ -48,11 +51,13 @@ const removeSite = async (site) => {
 
     console.log(`s3Client: $(s3Client)`);
 
+    console.log("waiting for credentials...")
+
     // Added to wait until AWS credentials are usable in case we had to
     // provision new ones. This may take up to 10 seconds.
     await s3Client.waitForCredentials();
 
-
+    console.log("...done")
 
     // Iterate by page over all of the objects in the bucket
     const paginationsConfig = { client: s3Client.client };

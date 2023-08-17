@@ -1,5 +1,6 @@
 const S3Helper = require('./S3Helper');
 const CloudFoundryAPIClient = require('../utils/cfApiClient');
+const { createSiteWebhook } = require('./GithubBuildHelper');
 
 const apiClient = new CloudFoundryAPIClient();
 
@@ -67,14 +68,18 @@ function listFilesPaged(s3Client, path, startAtKey = null) {
 function listPublishedPreviews(site) {
   const previewPath = `preview/${site.owner}/${site.repository}/`;
 
+  console.log("S3PublishedFileLister: site.s3ServiceName: ", site.s3ServiceName);
   return apiClient.fetchServiceInstanceCredentials(site.s3ServiceName)
     .then((credentials) => {
+      console.log("S3PublishedFileLister credentials", credentials);
+      console.log("S3PublishedFileLister about to initialize s3Client");
       const s3Client = new S3Helper.S3Client({
         accessKeyId: credentials.access_key_id,
         secretAccessKey: credentials.secret_access_key,
         region: credentials.region,
         bucket: credentials.bucket,
       });
+      console.log('s3Client initialized', s3Client);
 
       return listTopLevelFolders(s3Client, previewPath);
     });
