@@ -6,7 +6,6 @@ const { mockClient } = require('aws-sdk-client-mock');
 const mockTokenRequest = require('../../support/cfAuthNock');
 const apiNocks = require('../../support/cfAPINocks');
 const factory = require('../../support/factory');
-const config = require('../../../../config');
 const S3PublishedFileLister = require('../../../../api/services/S3PublishedFileLister');
 
 describe('S3PublishedFileLister', () => {
