@@ -1,3 +1,18 @@
+## 0.3.0 (2023-09-06)
+
+### Added
+
+- add DB models to support build task feature (#4184)
+- Allow users to create custom domains to prepare launch
+
+### Fixed
+
+- Admin UI for updated site branch configs and domains
+
+### Maintenance
+
+- use correct path for release notes
+
 ## 0.2.1 (2023-08-22)
 
 ### Performance
